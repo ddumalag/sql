@@ -1,4 +1,30 @@
 /* ASSIGNMENT 2 */
+/*Selection 1 
+Prompt 3
+The store wants to keep customer addresses. Propose two architectures for the CUSTOMER_ADDRESS table, one that will retain changes, and another that will overwrite. Which is type 1, which is type 2?
+
+HINT: search type 1 vs type 2 slowly changing dimensions.
+
+Customer_addresses (type 2 - which retains history)
+Address_ID
+customer_id
+country
+province
+city 
+street
+start_date
+end_date
+is_current
+
+customer_addresses (type 1 - which over writes historical info)
+address_id
+customer_id
+country
+province
+city 
+street 
+*/
+
 /* SECTION 2 */
 
 -- COALESCE
@@ -80,17 +106,15 @@ where visit_number = 1
 /* 3. Using a COUNT() window function, include a value along with each row of the 
 customer_purchases table that indicates how many different times that customer has purchased that product_id. */
 
--- i don't really get this one ****
+-- include a value with each row of the customer purcases that indicates how many times that customer purchased that product_id 
+-- so it would be like a row number function against  customer_id and market_date?
 
-
-select 
-product_id
-, customer_id
-, market_date
-
-count (*) over (PARTITION by customer_id, product_id) as purchase_count
-
-from customer_purchases
+SELECT 
+  product_id,
+  customer_id,
+  market_date,
+  COUNT(*) OVER (PARTITION BY customer_id, product_id) AS purchase_count
+FROM customer_purchases;
 
 
 -- String manipulations
@@ -260,33 +284,64 @@ INNER JOIN customer_purchases cp
     ON vi.product_id = cp.product_id
 
 	
--- needed help
-WITH customer_count AS (
-    SELECT COUNT(DISTINCT customer_id) AS num_customers
-    FROM customer_purchases
-),
+-- done with help but still really unsure 
 
-vendor_product_prices AS (
-    SELECT 
-        vi.vendor_id,
-        vi.product_id,
-        cp.cost_to_customer_per_qty
-    FROM vendor_inventory vi
-    INNER JOIN customer_purchases cp
-        ON vi.vendor_id = cp.vendor_id
-       AND vi.product_id = cp.product_id
-    GROUP BY vi.vendor_id, vi.product_id
-)
+tips 
+-- cross join for inventory and vendor
+-- and use above then cross join with customers 
+-- create temp table and query from the temp table to avoid using subquery 
 
-SELECT 
-    vpp.vendor_id,
-    p.product_name,
-    vpp.avg_price * 5 * cc.num_customers AS total_revenue
-FROM vendor_product_prices vpp
-INNER JOIN product p
-    ON vpp.product_id = p.product_id
-CROSS JOIN customer_count cc
-	
+drop table if exists vendor_x_product 
+
+create temp table vendor_x_product as 
+select 
+vi.vendor_id
+, vi.product_id
+, p.product_name
+from vendor_inventory vi
+INNER join product p
+on vi.product_id = p.product_id 
+
+drop table if exists vendor_name_x_product 
+
+create temp table vendor_name_x_product as 
+select 
+vp.vendor_id
+, vp.product_id
+, vp.product_name
+, v.vendor_name
+from vendor_x_product vp
+INNER join vendor v 
+on vp.vendor_id = v.vendor_id 
+
+
+drop table if exists vendor_x_product_x_customer
+
+create temp table vendor_x_product_x_customer as
+select 
+vp.vendor_id
+, vp.vendor_name
+, vp.product_id
+, vp.product_name
+, cp.customer_id
+, cp.cost_to_customer_per_qty
+from vendor_name_x_product vp
+cross join customer_purchases cp
+on vp.product_id = cp.product_id 
+
+select 
+vendor_id
+, vendor_name
+, product_id
+, product_name
+, cost_to_customer_per_qty
+, (cost_to_customer_per_qty * 5 * 26) as earnings_per_product 
+from vendor_x_product_x_customer
+
+group by vendor_id, vendor_name, product_id, product_name
+
+
+
 	
 -- INSERT
 /*1.  Create a new table "product_units". 
@@ -294,13 +349,27 @@ This table will contain only products where the `product_qty_type = 'unit'`.
 It should use all of the columns from the product table, as well as a new column for the `CURRENT_TIMESTAMP`.  
 Name the timestamp column `snapshot_timestamp`. */
 
+DROP TABLE IF EXISTS product_units;
+CREATE TABLE product_units AS
+SELECT *,
+	CURRENT_TIMESTAMP AS snapshot_timestamp
+	FROM product
+	WHERE 1 = 0;
+INSERT INTO product_units
+SELECT *,
+	CURRENT_TIMESTAMP
+	FROM product
+	WHERE product_qty_type = 'unit'
 
-
+	select *
+	from product_units
 
 
 /*2. Using `INSERT`, add a new row to the product_units table (with an updated timestamp). 
 This can be any product you desire (e.g. add another record for Apple Pie). */
 
+insert into product_units
+values (101, 'Passionfruit pie', 'big and juicy', 111, 'unit', CURRENT_TIMESTAMP) 
 
 
 -- DELETE
@@ -308,6 +377,13 @@ This can be any product you desire (e.g. add another record for Apple Pie). */
 
 HINT: If you don't specify a WHERE clause, you are going to have a bad time.*/
 
+DELETE FROM product_units
+WHERE product_id = 101
+AND snapshot_timestamp < (
+    SELECT MAX(snapshot_timestamp)
+    FROM product_units
+    WHERE product_id = 101
+)
 
 
 -- UPDATE
@@ -327,6 +403,25 @@ Finally, make sure you have a WHERE statement to update the right row,
 	you'll need to use product_units.product_id to refer to the correct row within the product_units table. 
 When you have all of these components, you can run the update statement. */
 
+ALTER TABLE product_units
+ADD current_quantity INT;
+
+-- how to get the "last" quantity per product 
+
+SELECT 
+  product_id,
+  MAX(quantity) AS last_quantity
+FROM vendor_inventory
+GROUP BY product_id;
+
+-- update 
+UPDATE product_units
+SET current_quantity = COALESCE((
+    SELECT MAX(vi.quantity)
+    FROM vendor_inventory vi
+    WHERE vi.product_id = product_units.product_id
+), 0)
 
 
+-- very lost on update..
 
